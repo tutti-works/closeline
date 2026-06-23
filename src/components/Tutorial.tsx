@@ -8,13 +8,17 @@ export function Tutorial({ open, onClose }: Props) {
   return (
     <div className="modal-backdrop">
       <section className="modal">
-        <p className="eyebrow">Tutorial</p>
         <h2>遊び方</h2>
         <ol>
-          <li>同じ長さの線を交互に置きます。</li>
-          <li>既存の線とは交差できません。端点だけ接続できます。</li>
-          <li>最後の1本で閉じた未獲得領域を、その手番のプレイヤーが取ります。</li>
-          <li>2人なら最大領域、3人以上なら合計面積で勝敗を決めます。</li>
+          <li>初期盤面には中立線が3本あります。</li>
+          <li>同じ長さの線を交互に引きます。</li>
+          <li>新しい線は既存線と交差させます。</li>
+          <li>交点は、後から線を引いたプレイヤーのドットになります。</li>
+          <li>自分のドット3点が実在する線で囲まれると三角形を獲得します。</li>
+          <li>一手で複数できた場合はすべて獲得します。</li>
+          <li>獲得面積の合計で勝敗を決めます。</li>
+          <li>獲得済み陣地には線を引けません。</li>
+          <li>縦方向に近い線は禁止です。</li>
         </ol>
         <button className="primary" onClick={onClose}>閉じる</button>
       </section>

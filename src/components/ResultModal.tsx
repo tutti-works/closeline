@@ -1,39 +1,37 @@
 import type { GameState } from '../types/game';
-import { getWinner } from '../game/rules/scoring';
+import { scoreFor } from '../game/state';
 
 type Props = {
   state: GameState;
-  onAgain: () => void;
+  onSame: () => void;
+  onNew: () => void;
   onSetup: () => void;
 };
 
-export function ResultModal({ state, onAgain, onSetup }: Props) {
-  if (state.phase !== 'ended') return null;
-  const winner = getWinner(state);
-  const names = winner.playerIds.map((id) => state.players.find((player) => player.id === id)?.name).join(', ');
-
+export function ResultModal({ state, onSame, onNew, onSetup }: Props) {
+  if (state.phase !== 'ended' || !state.result) return null;
+  const human = scoreFor(state, 'human');
+  const cpu = scoreFor(state, 'cpu');
+  const biggestCombo = state.territories.reduce((best, territory) => {
+    const combo = state.territories.filter((item) => item.comboId === territory.comboId);
+    const area = combo.reduce((sum, item) => sum + item.area, 0);
+    return area > best.area ? { count: combo.length, area } : best;
+  }, { count: 0, area: 0 });
   return (
     <div className="modal-backdrop">
       <section className="modal">
-        <p className="eyebrow">Game Over</p>
-        <h2>{winner.playerIds.length > 1 ? '引き分け' : `${names} の勝利`}</h2>
-        <p>{state.endedReason}</p>
+        <p className="eyebrow">{state.result.reason}</p>
+        <h2>{state.result.winner === 'draw' ? '引き分け' : `${state.result.winner === 'human' ? 'Human' : 'CPU'} の勝利`}</h2>
         <div className="result-grid">
-          {winner.scores.map((score) => {
-            const player = state.players.find((p) => p.id === score.playerId)!;
-            return (
-              <div key={score.playerId}>
-                <strong style={{ color: player.color }}>{player.name}</strong>
-                <span>合計 {Math.round(score.totalArea).toLocaleString()}</span>
-                <span>最大 {Math.round(score.largestArea).toLocaleString()}</span>
-                <span>{score.coveragePercent.toFixed(1)}%</span>
-              </div>
-            );
-          })}
+          <span>Human</span><strong>{(human.totalArea * 100).toFixed(1)}%</strong>
+          <span>CPU</span><strong>{(cpu.totalArea * 100).toFixed(1)}%</strong>
+          <span>獲得三角形</span><strong>{state.territories.length}</strong>
+          <span>最大コンボ</span><strong>{biggestCombo.count}個 / {(biggestCombo.area * 100).toFixed(1)}%</strong>
         </div>
-        <div className="actions">
-          <button className="primary" onClick={onAgain}>もう一度</button>
-          <button onClick={onSetup}>設定を変える</button>
+        <div className="button-row">
+          <button onClick={onSame}>同じ盤面でもう一度</button>
+          <button className="primary" onClick={onNew}>新しい盤面で遊ぶ</button>
+          <button onClick={onSetup}>設定を変更</button>
         </div>
       </section>
     </div>

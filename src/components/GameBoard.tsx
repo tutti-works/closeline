@@ -1,199 +1,151 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import type { GameState, Point } from '../types/game';
-import { makeFixedSegment, snapPoint } from '../game/geometry/segments';
-import { validateSegment } from '../game/rules/placement';
+import { useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import type { GameState, MoveEvaluation, Point } from '../types/game';
+import { evaluateMove, makeMoveFromStart, placeMove } from '../game/rules/placement';
+import { pointKey, segmentFromCenter } from '../game/geometry/math';
 
 type Props = {
   state: GameState;
-  onPlace: (a: Point, b: Point) => string | null;
+  setState: (updater: (state: GameState) => GameState) => void;
 };
 
 type Draft = {
-  start: Point;
-  end: Point;
-  valid: boolean;
-  reason: string | null;
+  anchor: Point;
+  pointer: Point;
+  evaluation: MoveEvaluation;
 };
 
-const toBoardPoint = (canvas: HTMLCanvasElement, event: PointerEvent | ReactPointerEvent): Point => {
-  const rect = canvas.getBoundingClientRect();
-  const scale = canvas.width / rect.width;
+const toBoardPoint = (element: SVGSVGElement, event: ReactPointerEvent<SVGSVGElement>): Point => {
+  const rect = element.getBoundingClientRect();
   return {
-    x: (event.clientX - rect.left) * scale,
-    y: (event.clientY - rect.top) * scale,
+    x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)),
+    y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)),
   };
 };
 
-const drawPolygon = (ctx: CanvasRenderingContext2D, points: Point[]) => {
-  ctx.beginPath();
-  points.forEach((point, index) => {
-    if (index === 0) ctx.moveTo(point.x, point.y);
-    else ctx.lineTo(point.x, point.y);
-  });
-  ctx.closePath();
-};
+const pathPoints = (points: Point[]) => points.map((point) => `${point.x},${point.y}`).join(' ');
 
-export function GameBoard({ state, onPlace }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+export function GameBoard({ state, setState }: Props) {
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const currentPlayer = useMemo(() => state.players.find((player) => player.id === state.currentPlayerId)!, [state]);
+  const [clickAnchor, setClickAnchor] = useState<Point | null>(null);
+  const humanTurn = state.phase === 'playing' && state.currentPlayerId === 'human';
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = '#f8fafc';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = '#0f172a';
-    ctx.lineWidth = 6;
-    ctx.strokeRect(3, 3, canvas.width - 6, canvas.height - 6);
+  const evaluateDraft = (anchor: Point, pointer: Point) => {
+    const startMove = makeMoveFromStart(anchor, pointer, state.settings.lineLength);
+    const startEvaluation = evaluateMove(state, 'human', startMove);
+    return { evaluation: startEvaluation };
+  };
 
-    ctx.save();
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = '#e2e8f0';
-    for (let i = 100; i < state.boardSize; i += 100) {
-      ctx.beginPath();
-      ctx.moveTo(i, 0);
-      ctx.lineTo(i, state.boardSize);
-      ctx.moveTo(0, i);
-      ctx.lineTo(state.boardSize, i);
-      ctx.stroke();
-    }
-    ctx.restore();
+  const draftLine = useMemo(() => {
+    if (!draft) return null;
+    const move = makeMoveFromStart(draft.anchor, draft.pointer, state.settings.lineLength);
+    const [a, b] = segmentFromCenter(move.center, move.angle, state.settings.lineLength);
+    return { a, b, move };
+  }, [draft, state.settings.lineLength]);
 
-    for (const region of state.regions) {
-      const owner = state.players.find((player) => player.id === region.ownerId)!;
-      drawPolygon(ctx, region.points);
-      ctx.fillStyle = `${owner.color}33`;
-      ctx.fill();
-      ctx.strokeStyle = `${owner.color}88`;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      const label = region.points.reduce((acc, point) => ({ x: acc.x + point.x / region.points.length, y: acc.y + point.y / region.points.length }), { x: 0, y: 0 });
-      ctx.fillStyle = owner.color;
-      ctx.font = '28px system-ui';
-      ctx.textAlign = 'center';
-      ctx.fillText(String(Math.round(region.area)), label.x, label.y);
-    }
-
-    for (const segment of state.segments) {
-      const owner = state.players.find((player) => player.id === segment.ownerId)!;
-      ctx.strokeStyle = owner.color;
-      ctx.lineWidth = 8;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(segment.a.x, segment.a.y);
-      ctx.lineTo(segment.b.x, segment.b.y);
-      ctx.stroke();
-      ctx.fillStyle = '#fff';
-      for (const point of [segment.a, segment.b]) {
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+  const begin = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (!humanTurn) return;
+    const point = toBoardPoint(event.currentTarget, event);
+    if (event.pointerType === 'mouse') {
+      if (!clickAnchor) {
+        setClickAnchor(point);
+        const pointer = { x: Math.min(1, point.x + 0.1), y: point.y };
+        setDraft({ anchor: point, pointer, ...evaluateDraft(point, pointer) });
+        return;
       }
-    }
-
-    if (draft) {
-      ctx.strokeStyle = draft.valid ? currentPlayer.color : '#ef4444';
-      ctx.lineWidth = 8;
-      ctx.setLineDash([18, 10]);
-      ctx.beginPath();
-      ctx.moveTo(draft.start.x, draft.start.y);
-      ctx.lineTo(draft.end.x, draft.end.y);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      if (state.settings.guides) {
-        ctx.fillStyle = draft.valid ? `${currentPlayer.color}22` : '#ef444422';
-        ctx.beginPath();
-        ctx.arc(draft.end.x, draft.end.y, 22, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-  }, [currentPlayer, draft, state]);
-
-  const updateDraft = (start: Point, pointer: Point) => {
-    const [rawA, rawB] = makeFixedSegment(start, pointer, state.settings.lineLength);
-    const a = snapPoint(rawA, state.segments, state.boardSize).point;
-    const b = snapPoint(rawB, state.segments, state.boardSize).point;
-    const reason = validateSegment(state, a, b);
-    const nextDraft = { start: a, end: b, valid: !reason, reason };
-    setDraft(nextDraft);
-    return nextDraft;
-  };
-
-  const handlePointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (currentPlayer.kind !== 'human' || state.phase !== 'playing') return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const start = snapPoint(toBoardPoint(event.currentTarget, event), state.segments, state.boardSize).point;
-    updateDraft(start, start);
-    setMessage(null);
-  };
-
-  const handlePointerMove = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!draft) return;
-    updateDraft(draft.start, toBoardPoint(event.currentTarget, event));
-  };
-
-  const handlePointerUp = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (!draft) return;
-    const nextDraft = updateDraft(draft.start, toBoardPoint(event.currentTarget, event));
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    if (!nextDraft.valid) {
-      setMessage(nextDraft.reason);
+      setDraft({ anchor: clickAnchor, pointer: point, ...evaluateDraft(clickAnchor, point) });
+      setClickAnchor(null);
       return;
     }
-    const reason = onPlace(nextDraft.start, nextDraft.end);
-    setMessage(reason);
-    if (!reason) setDraft(null);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const pointer = { x: Math.min(1, point.x + 0.1), y: point.y };
+    setDraft({ anchor: point, pointer, ...evaluateDraft(point, pointer) });
   };
 
-  const handlePointerCancel = (event: ReactPointerEvent<HTMLCanvasElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+  const move = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (!humanTurn) return;
+    const pointer = toBoardPoint(event.currentTarget, event);
+    if (event.pointerType === 'mouse' && clickAnchor) {
+      setDraft({ anchor: clickAnchor, pointer, ...evaluateDraft(clickAnchor, pointer) });
+      return;
     }
-    cancel();
+    if (!draft || event.pointerType === 'mouse') return;
+    setDraft({ anchor: draft.anchor, pointer, ...evaluateDraft(draft.anchor, pointer) });
+  };
+
+  const end = (event: ReactPointerEvent<SVGSVGElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
   const confirm = () => {
-    if (!draft) return;
-    const reason = onPlace(draft.start, draft.end);
-    setMessage(reason);
-    if (!reason) setDraft(null);
+    if (!draftLine || !draft?.evaluation.valid) return;
+    setState((current) => placeMove(current, 'human', draftLine.move));
+    setDraft(null);
+    setClickAnchor(null);
   };
 
   const cancel = () => {
     setDraft(null);
-    setMessage(null);
+    setClickAnchor(null);
   };
 
   return (
-    <main className="board-wrap">
-      <canvas
-        ref={canvasRef}
-        width={state.boardSize}
-        height={state.boardSize}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerCancel}
-        className="game-canvas"
-      />
-      <div className="board-tools">
-        {draft ? (
-          <>
-            <button className="primary" disabled={!draft.valid} onClick={confirm}>配置</button>
-            <button onClick={cancel}>キャンセル</button>
-            <span className={draft.valid ? 'ok' : 'bad'}>{draft.valid ? '配置できます' : draft.reason}</span>
-          </>
-        ) : (
-          <span>{currentPlayer.kind === 'cpu' ? 'CPU思考中...' : '盤面をドラッグして配置'}</span>
+    <section className="board-shell">
+      <svg className="board" viewBox="0 0 1 1" onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={() => setDraft(null)}>
+        <rect x="0" y="0" width="1" height="1" className="board-bg" />
+        {state.territories.map((territory) => (
+          <polygon key={territory.id} points={pathPoints(territory.points)} className={`territory ${territory.ownerId}`} />
+        ))}
+        {draft?.evaluation.previewTriangles.map((territory) => (
+          <polygon key={`preview-${territory.id}`} points={pathPoints(territory.points)} className="territory preview" />
+        ))}
+        {state.lines.map((line) => (
+          <line
+            key={line.id}
+            x1={line.a.x}
+            y1={line.a.y}
+            x2={line.b.x}
+            y2={line.b.y}
+            className={`line ${line.neutral ? 'neutral' : line.ownerId ?? ''} ${line.active ? '' : 'inactive'}`}
+          />
+        ))}
+        {draftLine && (
+          <line
+            x1={draftLine.a.x}
+            y1={draftLine.a.y}
+            x2={draftLine.b.x}
+            y2={draftLine.b.y}
+            className={`line draft ${draft?.evaluation.valid ? 'valid' : 'invalid'}`}
+          />
         )}
+        {clickAnchor && <circle cx={clickAnchor.x} cy={clickAnchor.y} r="0.014" className="click-anchor" />}
+        {state.nodes.map((node) => (
+          <circle
+            key={node.id}
+            cx={node.point.x}
+            cy={node.point.y}
+            r="0.012"
+            className={`dot ${node.ownerships.length > 1 ? 'shared' : node.ownerships[0]?.playerId ?? ''} ${node.active ? '' : 'inactive'}`}
+          />
+        ))}
+        {draft?.evaluation.intersections.map((point) => (
+          <circle key={`future-${pointKey(point)}`} cx={point.x} cy={point.y} r="0.01" className="dot future" />
+        ))}
+      </svg>
+      <div className="action-bar">
+        <div>
+          {draft ? (
+            <span className={draft.evaluation.valid ? 'ok' : 'bad'}>
+              {draft.evaluation.valid
+                ? `獲得予定 ${draft.evaluation.previewTriangles.length}個 / ${(draft.evaluation.gainedArea * 100).toFixed(1)}%`
+                : draft.evaluation.reason}
+            </span>
+          ) : (
+            <span>PCは始点と方向点をクリック。スマホは始点からドラッグします。</span>
+          )}
+        </div>
+        <button disabled={!draft?.evaluation.valid} onClick={confirm}>確定</button>
+        <button onClick={cancel}>キャンセル</button>
       </div>
-      {message && <div className="toast">{message}</div>}
-    </main>
+    </section>
   );
 }

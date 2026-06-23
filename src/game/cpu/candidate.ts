@@ -1,68 +1,73 @@
-import type { GameState, Point, Segment } from '../../types/game';
+import type { CpuCandidate, GameState, Move, Point } from '../../types/game';
+import { createRng, randomBetween } from '../random';
+import { evaluateMove, hasLikelyLegalMove } from '../rules/placement';
 import { distance } from '../geometry/math';
-import { makeFixedSegment } from '../geometry/segments';
-import { placeSegment } from '../rules/placement';
 
-export type CpuCandidate = {
-  a: Point;
-  b: Point;
-  score: number;
-  regions: number;
-  area: number;
-};
+const candidateLimit = {
+  EASY: 80,
+  NORMAL: 180,
+  HARD: 280,
+} as const;
 
-const random = (min: number, max: number) => min + Math.random() * (max - min);
+const moveAroundLine = (lineA: Point, lineB: Point, angle: number, t: number): Move => ({
+  center: { x: lineA.x + (lineB.x - lineA.x) * t, y: lineA.y + (lineB.y - lineA.y) * t },
+  angle,
+});
 
-const endpoints = (segments: Segment[]): Point[] => segments.flatMap((segment) => [segment.a, segment.b]);
-
-const boundaryPoint = (boardSize: number): Point => {
-  const side = Math.floor(Math.random() * 4);
-  const t = random(0, boardSize);
-  if (side === 0) return { x: t, y: 0 };
-  if (side === 1) return { x: boardSize, y: t };
-  if (side === 2) return { x: t, y: boardSize };
-  return { x: 0, y: t };
-};
-
-const seedPoint = (state: GameState): Point => {
-  const candidates = endpoints(state.segments);
-  if (candidates.length > 0 && Math.random() < 0.65) return candidates[Math.floor(Math.random() * candidates.length)];
-  if (Math.random() < 0.35) return boundaryPoint(state.boardSize);
-  return { x: random(120, state.boardSize - 120), y: random(120, state.boardSize - 120) };
-};
-
-const sampleCandidate = (state: GameState): CpuCandidate | null => {
-  const start = seedPoint(state);
-  const angle = random(0, Math.PI * 2);
-  const pointer = { x: start.x + Math.cos(angle) * state.settings.lineLength, y: start.y + Math.sin(angle) * state.settings.lineLength };
-  const [a, b] = makeFixedSegment(start, pointer, state.settings.lineLength);
-  const result = placeSegment(state, a, b);
-  if (!result.ok) return null;
-  const area = result.newRegions.reduce((sum, region) => sum + region.area, 0);
-  const centerBias = -distance({ x: state.boardSize / 2, y: state.boardSize / 2 }, { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }) / 1000;
-  return {
-    a,
-    b,
-    regions: result.newRegions.length,
-    area,
-    score: area / 1000 + result.newRegions.length * 250 + state.segments.length * 0.15 + centerBias,
-  };
-};
-
-export const findCpuMove = (state: GameState): CpuCandidate | null => {
-  const attempts = state.settings.cpuDifficulty === 'easy' ? 120 : state.settings.cpuDifficulty === 'normal' ? 450 : 1000;
-  const top: CpuCandidate[] = [];
-
-  for (let i = 0; i < attempts; i += 1) {
-    const candidate = sampleCandidate(state);
-    if (!candidate) continue;
-    if (state.settings.cpuDifficulty === 'easy' && Math.random() < 0.7) return candidate;
-    top.push(candidate);
-    top.sort((a, b) => b.score - a.score);
-    top.length = Math.min(top.length, state.settings.cpuDifficulty === 'hard' ? 12 : 6);
+const generateMoves = (state: GameState): Move[] => {
+  const rng = createRng(`${state.settings.seed}:cpu:${state.turn}:${state.lines.length}`);
+  const moves: Move[] = [];
+  const activeLines = state.lines.filter((line) => line.active);
+  for (const line of activeLines) {
+    const baseAngle = Math.atan2(line.b.y - line.a.y, line.b.x - line.a.x);
+    for (const offset of [Math.PI / 3, -Math.PI / 3, Math.PI / 2.8, -Math.PI / 2.8, Math.PI / 5, -Math.PI / 5]) {
+      for (const t of [0.25, 0.4, 0.55, 0.7]) {
+        moves.push(moveAroundLine(line.a, line.b, baseAngle + offset, t));
+      }
+    }
   }
+  for (const node of state.nodes.filter((node) => node.active)) {
+    for (let i = 0; i < 10; i += 1) {
+      moves.push({ center: node.point, angle: randomBetween(rng, 0, Math.PI * 2) });
+    }
+  }
+  for (let i = 0; i < candidateLimit[state.settings.difficulty]; i += 1) {
+    moves.push({
+      center: { x: randomBetween(rng, 0.14, 0.86), y: randomBetween(rng, 0.14, 0.86) },
+      angle: randomBetween(rng, 0, Math.PI * 2),
+    });
+  }
+  return moves;
+};
 
-  if (top.length === 0) return null;
-  if (state.settings.cpuDifficulty === 'hard') return top[0];
-  return top[Math.floor(Math.random() * Math.min(3, top.length))];
+const evaluateCpuScore = (state: GameState, move: Move): CpuCandidate | null => {
+  const evaluation = evaluateMove(state, 'cpu', move);
+  if (!evaluation.valid) return null;
+  const centerBias = 1 - Math.min(1, distance(move.center, { x: 0.5, y: 0.5 }));
+  const spread = Math.min(0.6, distance(move.center, { x: 0.5, y: 0.5 }));
+  let score = evaluation.gainedArea * 1000 + evaluation.previewTriangles.length * 30 + evaluation.intersections.length * 6;
+  score += centerBias * 2 + spread * 3;
+  if (state.settings.difficulty === 'EASY') score += Math.random() * 40;
+  if (state.settings.difficulty === 'HARD') score += (hasLikelyLegalMove({ ...state, currentPlayerId: 'human' }, 'human') ? 0 : 20);
+  return { move, evaluation, score };
+};
+
+export const findCpuMove = async (state: GameState): Promise<CpuCandidate | null> => {
+  const moves = generateMoves(state);
+  const candidates: CpuCandidate[] = [];
+  const chunkSize = 60;
+  for (let i = 0; i < moves.length; i += chunkSize) {
+    for (const move of moves.slice(i, i + chunkSize)) {
+      const candidate = evaluateCpuScore(state, move);
+      if (candidate) candidates.push(candidate);
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+  }
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.score - a.score);
+  if (state.settings.difficulty === 'EASY') {
+    const top = candidates.slice(0, Math.min(12, candidates.length));
+    return top[Math.floor(Math.random() * top.length)];
+  }
+  return candidates[0];
 };

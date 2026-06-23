@@ -1,46 +1,58 @@
-import { BOARD_SIZE, DEFAULT_PLAYERS } from './constants';
-import type { CpuDifficulty, GameSettings, GameState, Player, WinMode } from '../types/game';
+import type { GameSettings, GameState, Player, PlayerId } from '../types/game';
+import { DEFAULT_LINE_LENGTH, DEFAULT_MAX_TURNS, DEFAULT_MIN_AREA_RATIO } from './constants';
+import { generateInitialLines } from './initialBoard/generate';
 
-export const defaultSettings: GameSettings = {
-  playerCount: 2,
-  cpuDifficulty: 'normal',
-  maxTurns: 80,
-  lineLength: 180,
-  effects: true,
+export const players: Player[] = [
+  { id: 'human', name: 'Human', color: '#2563eb' },
+  { id: 'cpu', name: 'CPU', color: '#dc2626' },
+];
+
+export const defaultSettings = (): GameSettings => ({
+  difficulty: 'NORMAL',
+  maxTurns: DEFAULT_MAX_TURNS,
+  lineLength: DEFAULT_LINE_LENGTH,
+  minTriangleAreaRatio: DEFAULT_MIN_AREA_RATIO,
+  sound: false,
   guides: true,
-};
+  seed: String(Date.now()),
+});
 
-export const winModeForPlayerCount = (playerCount: 2 | 3 | 4): WinMode =>
-  playerCount === 2 ? 'largest-region' : 'total-area';
+export const createGame = (settings: GameSettings): GameState => ({
+  players,
+  settings,
+  phase: 'playing',
+  currentPlayerId: 'human',
+  turn: 1,
+  consecutivePasses: 0,
+  lines: generateInitialLines(settings),
+  nodes: [],
+  territories: [],
+});
 
-export const createPlayers = (playerCount: 2 | 3 | 4): Player[] =>
-  DEFAULT_PLAYERS.slice(0, playerCount).map((player, index) => ({
-    ...player,
-    kind: index === 0 ? 'human' : 'cpu',
-    name: index === 0 ? 'Player' : `CPU ${index}`,
-  }));
+export const otherPlayer = (playerId: PlayerId): PlayerId => (playerId === 'human' ? 'cpu' : 'human');
 
-export const createInitialState = (settings: GameSettings = defaultSettings): GameState => {
-  const players = createPlayers(settings.playerCount);
+export const scoreFor = (state: GameState, playerId: PlayerId) => {
+  const territories = state.territories.filter((territory) => territory.ownerId === playerId);
+  const totalArea = territories.reduce((sum, territory) => sum + territory.area, 0);
   return {
-    version: 1,
-    phase: 'playing',
-    boardSize: BOARD_SIZE,
-    settings,
-    winMode: winModeForPlayerCount(settings.playerCount),
-    players,
-    currentPlayerId: players[0].id,
-    turn: 0,
-    consecutivePasses: 0,
-    segments: [],
-    regions: [],
+    totalArea,
+    areaRatio: totalArea,
+    count: territories.length,
+    maxArea: Math.max(0, ...territories.map((territory) => territory.area)),
   };
 };
 
-export const updateSettings = (
-  current: GameSettings,
-  patch: Partial<GameSettings> & { cpuDifficulty?: CpuDifficulty },
-): GameSettings => ({
-  ...current,
-  ...patch,
+export const resolveWinner = (state: GameState) => {
+  const human = scoreFor(state, 'human');
+  const cpu = scoreFor(state, 'cpu');
+  if (Math.abs(human.totalArea - cpu.totalArea) > 1e-5) return human.totalArea > cpu.totalArea ? 'human' : 'cpu';
+  if (human.count !== cpu.count) return human.count > cpu.count ? 'human' : 'cpu';
+  if (Math.abs(human.maxArea - cpu.maxArea) > 1e-5) return human.maxArea > cpu.maxArea ? 'human' : 'cpu';
+  return 'draw';
+};
+
+export const finishGame = (state: GameState, reason: string): GameState => ({
+  ...state,
+  phase: 'ended',
+  result: { winner: resolveWinner(state), reason },
 });

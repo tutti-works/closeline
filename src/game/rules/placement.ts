@@ -1,118 +1,171 @@
-import { EPS } from '../constants';
-import type { GameState, PlacementResult, Point, Region, Segment } from '../../types/game';
-import { pointKey, polygonArea, polygonCentroid } from '../geometry/math';
-import { polygonize, polygonSignature } from '../geometry/polygonize';
-import {
-  isWithinBoard,
-  segmentTouchesCapturedInterior,
-  segmentsCrossImproperly,
-  segmentsOverlap,
-  snapPoint,
-} from '../geometry/segments';
+import type { GameState, IntersectionNode, LineSegment, Move, MoveEvaluation, PlayerId, Point } from '../../types/game';
+import { EPSILON } from '../constants';
+import { finishGame, otherPlayer } from '../state';
+import { isVerticalForbidden, pointInTriangle, pointKey, pointOnSegment, segmentFromCenter, segmentWithinBoard } from '../geometry/math';
+import { collinearOverlap, properIntersectionPoint, segmentIntersection } from '../geometry/segments';
+import { segmentTouchesTriangle } from '../geometry/triangles';
+import { applyTerritoryCapture, detectPlayerTriangles } from '../triangles/detect';
 
-const nextId = (prefix: string): string => `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+const lineFromMove = (move: Move, length: number): [Point, Point] => segmentFromCenter(move.center, move.angle, length);
 
-export const getExistingRegionSignatures = (regions: Region[]): Set<string> => new Set(regions.map((region) => polygonSignature(region.points)));
+const findNodeAt = (nodes: IntersectionNode[], point: Point) => nodes.find((node) => node.active && pointKey(node.point) === pointKey(point));
 
-export const validateSegment = (state: GameState, a: Point, b: Point): string | null => {
-  if (!isWithinBoard(a, b, state.boardSize)) return '盤面の外へはみ出しています';
-  if (Math.hypot(a.x - b.x, a.y - b.y) < EPS) return '線が短すぎます';
-  if (segmentTouchesCapturedInterior(a, b, state.regions)) return '獲得済み領域の内側には置けません';
+const uniquePoints = (points: Point[]) => {
+  const map = new Map<string, Point>();
+  for (const point of points) map.set(pointKey(point), point);
+  return [...map.values()];
+};
 
-  for (const segment of state.segments) {
-    if (segmentsCrossImproperly(a, b, segment.a, segment.b)) return '既存の線と交差しています';
-    if (segmentsOverlap(a, b, segment.a, segment.b)) return '既存の線と重なっています';
+const pointInExistingTerritory = (state: GameState, point: Point) =>
+  state.territories.some((territory) => pointInTriangle(point, territory.points[0], territory.points[1], territory.points[2]));
+
+export const evaluateMove = (state: GameState, playerId: PlayerId, move: Move): MoveEvaluation => {
+  const [a, b] = lineFromMove(move, state.settings.lineLength);
+  if (!segmentWithinBoard(a, b)) return invalid('線が盤面外へ出ています');
+  if (isVerticalForbidden(move.angle)) return invalid('縦方向に近い線は禁止です');
+  const activeLines = state.lines.filter((line) => line.active);
+  if (activeLines.some((line) => collinearOverlap(a, b, line.a, line.b))) return invalid('既存線と重なっています');
+  if (state.territories.some((territory) => segmentTouchesTriangle(a, b, territory))) return invalid('獲得済み陣地には触れられません');
+
+  const intersections: Point[] = [];
+  for (const line of activeLines) {
+    const hit = segmentIntersection(a, b, line.a, line.b);
+    if (hit.intersects && !hit.overlaps && hit.point && !pointInExistingTerritory(state, hit.point)) intersections.push(hit.point);
   }
-  return null;
-};
-
-export const normalizePlacement = (state: GameState, rawA: Point, rawB: Point): [Point, Point] => {
-  const a = snapPoint(rawA, state.segments, state.boardSize).point;
-  const b = snapPoint(rawB, state.segments, state.boardSize).point;
-  return [a, b];
-};
-
-const findNewRegions = (state: GameState, nextSegments: Segment[], segmentId: string, ownerId: string): Region[] => {
-  const existing = getExistingRegionSignatures(state.regions);
-  const polygons = polygonize(nextSegments, state.boardSize);
-  const newRegions: Region[] = [];
-  const seen = new Set(existing);
-
-  for (const points of polygons) {
-    const signature = polygonSignature(points);
-    if (seen.has(signature)) continue;
-    seen.add(signature);
-    const area = polygonArea(points);
-    if (area <= EPS) continue;
-    const centroid = polygonCentroid(points);
-    const duplicate = state.regions.some((region) => pointKey(polygonCentroid(region.points)) === pointKey(centroid));
-    if (duplicate) continue;
-    newRegions.push({
-      id: nextId('region'),
-      ownerId,
-      points,
-      area,
-      createdBySegmentId: segmentId,
-    });
+  for (const node of state.nodes.filter((node) => node.active)) {
+    if (pointOnSegment(node.point, a, b) && !pointInExistingTerritory(state, node.point)) intersections.push(node.point);
   }
-  return newRegions;
-};
+  const properCount = activeLines.filter((line) => {
+    const point = properIntersectionPoint(a, b, line.a, line.b);
+    return point && !pointInExistingTerritory(state, point);
+  }).length;
+  if (properCount < 1) return invalid('既存線と1回以上交差させてください');
 
-export const getNextActivePlayerId = (state: GameState, fromIndex: number): string | null => {
-  for (let offset = 1; offset <= state.players.length; offset += 1) {
-    const player = state.players[(fromIndex + offset) % state.players.length];
-    return player.id;
-  }
-  return null;
-};
-
-export const placeSegment = (state: GameState, rawA: Point, rawB: Point): PlacementResult => {
-  if (state.phase !== 'playing') return { ok: false, reason: 'ゲーム中ではありません' };
-  const [a, b] = normalizePlacement(state, rawA, rawB);
-  const validation = validateSegment(state, a, b);
-  if (validation) return { ok: false, reason: validation };
-
-  const segment: Segment = {
-    id: nextId('seg'),
-    ownerId: state.currentPlayerId,
-    a,
-    b,
-  };
-  const nextSegments = [...state.segments, segment];
-  const newRegions = findNewRegions(state, nextSegments, segment.id, state.currentPlayerId);
-  const currentIndex = state.players.findIndex((player) => player.id === state.currentPlayerId);
-  return {
-    ok: true,
-    segment,
-    newRegions,
-    nextPlayerId: getNextActivePlayerId(state, currentIndex),
-  };
-};
-
-export const applyPlacement = (state: GameState, result: Extract<PlacementResult, { ok: true }>): GameState => {
-  const nextTurn = state.turn + 1;
-  const ended = nextTurn >= state.settings.maxTurns;
-  return {
+  const previewNodes = makePreviewNodes(state, playerId, uniquePoints(intersections), a, b);
+  const previewState = {
     ...state,
-    phase: ended ? 'ended' : state.phase,
-    endedReason: ended ? '最大ターンに到達しました' : undefined,
-    currentPlayerId: result.nextPlayerId ?? state.currentPlayerId,
-    turn: nextTurn,
+    lines: [...state.lines, makeLine(state, playerId, a, b)],
+    nodes: previewNodes,
+  };
+  const beforeIds = new Set(detectPlayerTriangles(state, playerId, state.turn).map((triangle) => triangle.id));
+  const previewTriangles = detectPlayerTriangles(previewState, playerId, state.turn).filter((triangle) => !beforeIds.has(triangle.id));
+  return {
+    valid: true,
+    intersections: uniquePoints(intersections),
+    previewNodes,
+    previewTriangles,
+    gainedArea: previewTriangles.reduce((sum, triangle) => sum + triangle.area, 0),
+  };
+};
+
+const invalid = (reason: string): MoveEvaluation => ({
+  valid: false,
+  reason,
+  intersections: [],
+  previewNodes: [],
+  previewTriangles: [],
+  gainedArea: 0,
+});
+
+const makeLine = (state: GameState, playerId: PlayerId, a: Point, b: Point): LineSegment => ({
+  id: `line-${state.turn}-${playerId}-${state.lines.length + 1}`,
+  a,
+  b,
+  ownerId: playerId,
+  neutral: false,
+  generatedTurn: state.turn,
+  active: true,
+});
+
+const makePreviewNodes = (state: GameState, playerId: PlayerId, points: Point[], a: Point, b: Point) => {
+  const nodes = state.nodes.map((node) => ({ ...node, ownerships: [...node.ownerships] }));
+  const newLineId = `line-${state.turn}-${playerId}-${state.lines.length + 1}`;
+  for (const point of points) {
+    const lineIds = state.lines.filter((line) => line.active && pointOnSegment(point, line.a, line.b)).map((line) => line.id);
+    if (pointOnSegment(point, a, b)) lineIds.push(newLineId);
+    const existing = findNodeAt(nodes, point);
+    if (existing) {
+      const ownership = existing.ownerships.find((item) => item.playerId === playerId);
+      if (ownership) ownership.lineIds = [...new Set([...ownership.lineIds, ...lineIds])];
+      else existing.ownerships.push({ playerId, turn: state.turn, lineIds });
+      existing.lineIds = [...new Set([...existing.lineIds, ...lineIds])];
+    } else {
+      nodes.push({
+        id: `dot-${pointKey(point)}`,
+        point,
+        ownerships: [{ playerId, turn: state.turn, lineIds }],
+        generatedTurn: state.turn,
+        lineIds,
+        active: true,
+      });
+    }
+  }
+  return nodes;
+};
+
+export const placeMove = (state: GameState, playerId: PlayerId, move: Move): GameState => {
+  const evaluation = evaluateMove(state, playerId, move);
+  if (!evaluation.valid) return state;
+  const [a, b] = lineFromMove(move, state.settings.lineLength);
+  const line = makeLine(state, playerId, a, b);
+  let next: GameState = {
+    ...state,
+    lines: [...state.lines, line],
+    nodes: evaluation.previewNodes,
     consecutivePasses: 0,
-    segments: [...state.segments, result.segment],
-    regions: [...state.regions, ...result.newRegions],
+    lastPass: undefined,
+    lastMessage: evaluation.previewTriangles.length > 0 ? `${evaluation.previewTriangles.length}個の三角形を獲得` : undefined,
+  };
+  next = applyTerritoryCapture(next, evaluation.previewTriangles);
+  const advanced = advanceTurn(next);
+  if (advanced.turn > advanced.settings.maxTurns) return finishGame(advanced, '最大ターンに到達しました');
+  return advanced;
+};
+
+export const passTurn = (state: GameState, playerId: PlayerId, reason = '合法手が見つかりませんでした'): GameState => {
+  const next = {
+    ...state,
+    consecutivePasses: state.consecutivePasses + 1,
+    lastPass: playerId,
+    lastMessage: `${playerId === 'human' ? 'Human' : 'CPU'} がパス: ${reason}`,
+  };
+  if (next.consecutivePasses >= 2) return finishGame(next, '双方が連続してパスしました');
+  return advanceTurn(next);
+};
+
+const advanceTurn = (state: GameState): GameState => ({
+  ...state,
+  currentPlayerId: otherPlayer(state.currentPlayerId),
+  turn: state.currentPlayerId === 'cpu' ? state.turn + 1 : state.turn,
+});
+
+export const makeMoveFromDrag = (center: Point, pointer: Point): Move => ({
+  center,
+  angle: Math.atan2(pointer.y - center.y, pointer.x - center.x),
+});
+
+export const makeMoveFromStart = (start: Point, pointer: Point, length: number): Move => {
+  const angle = Math.atan2(pointer.y - start.y, pointer.x - start.x);
+  return {
+    center: {
+      x: start.x + (Math.cos(angle) * length) / 2,
+      y: start.y + (Math.sin(angle) * length) / 2,
+    },
+    angle,
   };
 };
 
-export const passTurn = (state: GameState): GameState => {
-  const currentIndex = state.players.findIndex((player) => player.id === state.currentPlayerId);
-  const nextPasses = state.consecutivePasses + 1;
-  const ended = nextPasses >= state.players.length;
-  return {
-    ...state,
-    phase: ended ? 'ended' : state.phase,
-    endedReason: ended ? '全員が連続でパスしました' : undefined,
-    currentPlayerId: getNextActivePlayerId(state, currentIndex) ?? state.currentPlayerId,
-    consecutivePasses: nextPasses,
-  };
+export const hasLikelyLegalMove = (state: GameState, playerId: PlayerId) => {
+  const activeLines = state.lines.filter((line) => line.active);
+  for (const line of activeLines) {
+    for (let i = 0; i < 16; i += 1) {
+      const t = (i + 1) / 17;
+      const center = { x: line.a.x + (line.b.x - line.a.x) * t, y: line.a.y + (line.b.y - line.a.y) * t };
+      for (let j = 0; j < 12; j += 1) {
+        const angle = (j / 12) * Math.PI * 2 + EPSILON;
+        if (evaluateMove(state, playerId, { center, angle }).valid) return true;
+      }
+    }
+  }
+  return false;
 };

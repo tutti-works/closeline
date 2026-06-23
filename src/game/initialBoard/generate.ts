@@ -4,7 +4,7 @@ import { isVerticalForbidden, segmentFromCenter, segmentWithinBoard } from '../g
 import { segmentDistance, segmentIntersection } from '../geometry/segments';
 import { createRng, randomBetween } from '../random';
 
-const minDistance = 0.09;
+const minDistance = 0.15;
 const edgeMargin = 0.1;
 
 const fallback = (settings: GameSettings): NeutralLine[] => [

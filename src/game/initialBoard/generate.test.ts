@@ -22,7 +22,7 @@ describe('initial board', () => {
     for (let i = 0; i < a.length; i += 1) {
       for (let j = i + 1; j < a.length; j += 1) {
         expect(segmentIntersection(a[i].a, a[i].b, a[j].a, a[j].b).intersects).toBe(false);
-        expect(segmentDistance(a[i].a, a[i].b, a[j].a, a[j].b)).toBeGreaterThanOrEqual(0.09 - 1e-5);
+        expect(segmentDistance(a[i].a, a[i].b, a[j].a, a[j].b)).toBeGreaterThanOrEqual(0.15 - 1e-5);
       }
     }
   });

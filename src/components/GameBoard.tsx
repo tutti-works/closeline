@@ -128,7 +128,7 @@ export function GameBoard({ state, setState }: Props) {
           />
         ))}
         {draft?.evaluation.intersections.map((point) => (
-          <circle key={`future-${pointKey(point)}`} cx={point.x} cy={point.y} r="0.01" className="dot future" />
+          <circle key={`future-${pointKey(point)}`} cx={point.x} cy={point.y} r="0.012" className="dot future" />
         ))}
       </svg>
       <div className="action-bar">

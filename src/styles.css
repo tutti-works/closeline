@@ -157,8 +157,8 @@ button.primary {
 
 .dot.future {
   fill: #22c55e;
-  stroke: #16a34a;
-  stroke-width: 0.0015;
+  stroke: #f8fafc;
+  stroke-width: 0.002;
 }
 
 .click-anchor {

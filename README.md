@@ -24,6 +24,16 @@ npm.cmd run test
 npm.cmd run lint
 ```
 
+## AI学習
+
+Node.js上で自己対戦を回し、CPU評価用の重みを更新できます。
+
+```powershell
+npm.cmd run train:ai -- --games=20 --turns=14
+```
+
+結果は `src/game/cpu/learnedWeights.json` に保存され、ブラウザ版CPUが読み込みます。回数を増やすほど時間がかかります。
+
 ## ビルド方法
 
 ```powershell

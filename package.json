@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
+    "train:ai": "node scripts/train-ai.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

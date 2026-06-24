@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "trainedGames": 30,
+  "updatedAt": "2026-06-24T02:48:23.299Z",
+  "weights": {
+    "gainedArea": 5295.18453,
+    "triangleCount": 253.46933,
+    "intersectionCount": 22.1346,
+    "ownedDots": 3.23857,
+    "opponentDots": -1.2,
+    "centerBias": -3.90103,
+    "spread": 18.44536,
+    "crowding": -55.83051,
+    "frontier": 37.15596,
+    "scoreDelta": 2647.59226,
+    "replyRisk": -0.28,
+    "mobilityDiff": 0.7,
+    "terminalBonus": 40
+  }
+}

@@ -4,6 +4,7 @@ import { evaluateMove, hasLikelyLegalMove, placeMove } from '../rules/placement'
 import { distance } from '../geometry/math';
 import { scoreFor } from '../state';
 import { appendAiDecisionLog } from './selfPlayLog';
+import learnedWeights from './learnedWeights.json';
 
 const candidateLimit = {
   EASY: 90,
@@ -27,6 +28,53 @@ const chunkDelay = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const opponentOf = (playerId: PlayerId): PlayerId => (playerId === 'human' ? 'cpu' : 'human');
 
+const moveFromStart = (start: Point, angle: number, length: number): Move => ({
+  center: {
+    x: start.x + (Math.cos(angle) * length) / 2,
+    y: start.y + (Math.sin(angle) * length) / 2,
+  },
+  angle,
+});
+
+export type AiFeatures = {
+  gainedArea: number;
+  triangleCount: number;
+  intersectionCount: number;
+  ownedDots: number;
+  opponentDots: number;
+  centerBias: number;
+  spread: number;
+  crowding: number;
+  frontier: number;
+  scoreDelta: number;
+  replyRisk: number;
+  mobilityDiff: number;
+  terminalBonus: number;
+};
+
+export type AiWeights = Record<keyof AiFeatures, number>;
+
+export const DEFAULT_AI_WEIGHTS: AiWeights = {
+  gainedArea: 5200,
+  triangleCount: 220,
+  intersectionCount: 18,
+  ownedDots: 3,
+  opponentDots: -1.2,
+  centerBias: -4,
+  spread: 18,
+  crowding: -55,
+  frontier: 36,
+  scoreDelta: 2600,
+  replyRisk: -0.28,
+  mobilityDiff: 0.7,
+  terminalBonus: 40,
+};
+
+export const activeAiWeights: AiWeights = { ...DEFAULT_AI_WEIGHTS, ...learnedWeights.weights };
+
+export const scoreFeatures = (features: AiFeatures, weights: AiWeights = activeAiWeights) =>
+  Object.entries(features).reduce((sum, [key, value]) => sum + value * weights[key as keyof AiFeatures], 0);
+
 const moveAroundLine = (lineA: Point, lineB: Point, angle: number, t: number): Move => ({
   center: { x: lineA.x + (lineB.x - lineA.x) * t, y: lineA.y + (lineB.y - lineA.y) * t },
   angle,
@@ -47,6 +95,37 @@ const dedupeMoves = (moves: Move[]) => {
 const validOwnedNodes = (state: GameState, playerId: PlayerId) =>
   state.nodes.filter((node) => node.active && node.ownerships.some((ownership) => ownership.playerId === playerId));
 
+const ownedNodeCount = (state: GameState, playerId: PlayerId) =>
+  state.nodes.filter((node) => node.active && node.ownerships.some((ownership) => ownership.playerId === playerId)).length;
+
+const previewOwnedNodeCount = (nodes: GameState['nodes'], playerId: PlayerId) =>
+  nodes.filter((node) => node.active && node.ownerships.some((ownership) => ownership.playerId === playerId)).length;
+
+const boardActivityCenter = (state: GameState): Point => {
+  const points = [
+    ...state.nodes.filter((node) => node.active).map((node) => node.point),
+    ...state.lines.filter((line) => line.active).flatMap((line) => [line.a, line.b]),
+  ];
+  if (points.length === 0) return { x: 0.5, y: 0.5 };
+  return {
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+  };
+};
+
+const localCrowding = (state: GameState, point: Point) => {
+  const nodeCrowding = state.nodes
+    .filter((node) => node.active)
+    .reduce((sum, node) => sum + Math.max(0, 1 - distance(point, node.point) / 0.22), 0);
+  const lineCrowding = state.lines
+    .filter((line) => line.active)
+    .reduce((sum, line) => {
+      const center = { x: (line.a.x + line.b.x) / 2, y: (line.a.y + line.b.y) / 2 };
+      return sum + Math.max(0, 1 - distance(point, center) / 0.25);
+    }, 0);
+  return Math.min(1, (nodeCrowding + lineCrowding * 0.45) / 8);
+};
+
 export const generateMoves = (state: GameState, playerId: PlayerId, maxRandom: number = candidateLimit[state.settings.difficulty]): Move[] => {
   const rng = createRng(`${state.settings.seed}:${playerId}:${state.turn}:${state.lines.length}:${state.nodes.length}`);
   const moves: Move[] = [];
@@ -65,10 +144,10 @@ export const generateMoves = (state: GameState, playerId: PlayerId, maxRandom: n
   for (const node of activeNodes) {
     for (const line of activeLines.slice(0, 18)) {
       const baseAngle = Math.atan2(line.b.y - line.a.y, line.b.x - line.a.x);
-      moves.push({ center: node.point, angle: baseAngle + Math.PI / 2.5 });
-      moves.push({ center: node.point, angle: baseAngle - Math.PI / 2.5 });
+      moves.push(moveFromStart(node.point, baseAngle + Math.PI / 2.5, state.settings.lineLength));
+      moves.push(moveFromStart(node.point, baseAngle - Math.PI / 2.5, state.settings.lineLength));
     }
-    for (let i = 0; i < 4; i += 1) moves.push({ center: node.point, angle: randomBetween(rng, 0, Math.PI * 2) });
+    for (let i = 0; i < 4; i += 1) moves.push(moveFromStart(node.point, randomBetween(rng, 0, Math.PI * 2), state.settings.lineLength));
   }
 
   for (const nodes of [ownNodes, enemyNodes]) {
@@ -80,8 +159,8 @@ export const generateMoves = (state: GameState, playerId: PlayerId, maxRandom: n
         if (d <= 0.02 || d > state.settings.lineLength * 0.98) continue;
         const angle = Math.atan2(b.y - a.y, b.x - a.x);
         moves.push({ center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, angle });
-        moves.push({ center: a, angle });
-        moves.push({ center: b, angle: angle + Math.PI });
+        moves.push(moveFromStart(a, angle, state.settings.lineLength));
+        moves.push(moveFromStart(b, angle + Math.PI, state.settings.lineLength));
       }
     }
   }
@@ -93,27 +172,51 @@ export const generateMoves = (state: GameState, playerId: PlayerId, maxRandom: n
     });
   }
 
+  const activityCenter = boardActivityCenter(state);
+  for (const line of activeLines.slice(-12)) {
+    const baseAngle = Math.atan2(line.b.y - line.a.y, line.b.x - line.a.x);
+    const lineCenter = { x: (line.a.x + line.b.x) / 2, y: (line.a.y + line.b.y) / 2 };
+    const outward = Math.atan2(lineCenter.y - activityCenter.y, lineCenter.x - activityCenter.x);
+    for (const t of [0.2, 0.5, 0.8]) {
+      const center = { x: line.a.x + (line.b.x - line.a.x) * t, y: line.a.y + (line.b.y - line.a.y) * t };
+      moves.push({ center, angle: outward + Math.PI / 5 });
+      moves.push({ center, angle: outward - Math.PI / 5 });
+      moves.push({ center, angle: baseAngle + Math.PI / 2.2 });
+    }
+  }
+
   return dedupeMoves(moves);
 };
 
 const mobility = (state: GameState, playerId: PlayerId, sample = 50) =>
   generateMoves(state, playerId, sample).filter((move) => evaluateMove(state, playerId, move).valid).length;
 
-const lightCandidate = (state: GameState, move: Move, playerId: PlayerId): CpuCandidate | null => {
+export const lightCandidate = (state: GameState, move: Move, playerId: PlayerId, weights: AiWeights = activeAiWeights): CpuCandidate | null => {
   const evaluation = evaluateMove(state, playerId, move);
   if (!evaluation.valid) return null;
   const centerBias = 1 - Math.min(1, distance(move.center, { x: 0.5, y: 0.5 }));
   const spread = Math.min(0.65, distance(move.center, { x: 0.5, y: 0.5 }));
-  const ownedDots = evaluation.previewNodes.filter((node) => node.active && node.ownerships.some((ownership) => ownership.playerId === playerId)).length;
-  const opponentDots = evaluation.previewNodes.filter((node) => node.active && node.ownerships.some((ownership) => ownership.playerId === opponentOf(playerId))).length;
-  const score =
-    evaluation.gainedArea * 1800 +
-    evaluation.previewTriangles.length * 85 +
-    evaluation.intersections.length * 13 +
-    ownedDots * 1.7 -
-    opponentDots * 0.6 +
-    centerBias * 2 +
-    spread * 2;
+  const activityCenter = boardActivityCenter(state);
+  const frontier = Math.min(1, distance(move.center, activityCenter) / 0.55);
+  const crowding = localCrowding(state, move.center);
+  const ownedDots = previewOwnedNodeCount(evaluation.previewNodes, playerId) - ownedNodeCount(state, playerId);
+  const opponentDots = previewOwnedNodeCount(evaluation.previewNodes, opponentOf(playerId)) - ownedNodeCount(state, opponentOf(playerId));
+  const features: AiFeatures = {
+    gainedArea: evaluation.gainedArea,
+    triangleCount: evaluation.previewTriangles.length,
+    intersectionCount: evaluation.intersections.length,
+    ownedDots,
+    opponentDots,
+    centerBias,
+    spread,
+    crowding,
+    frontier,
+    scoreDelta: 0,
+    replyRisk: 0,
+    mobilityDiff: 0,
+    terminalBonus: 0,
+  };
+  const score = scoreFeatures(features, weights);
   return { move, evaluation, score };
 };
 
@@ -126,28 +229,48 @@ const bestReplyScore = (state: GameState, playerId: PlayerId, maxMoves: number) 
   return candidates.reduce((best, candidate) => Math.max(best, candidate.score), 0);
 };
 
-const deepenCandidate = (state: GameState, candidate: CpuCandidate, playerId: PlayerId): CpuCandidate => {
-  if (state.settings.difficulty === 'EASY') return candidate;
-  const simulated = placeMove(state, playerId, candidate.move);
+export const candidateFeatures = (state: GameState, candidate: CpuCandidate, playerId: PlayerId): AiFeatures => {
   const opponent = opponentOf(playerId);
+  const simulated = placeMove(state, playerId, candidate.move);
   const before = scoreFor(state, playerId).totalArea - scoreFor(state, opponent).totalArea;
   const after = scoreFor(simulated, playerId).totalArea - scoreFor(simulated, opponent).totalArea;
   const replyRisk = bestReplyScore(simulated, opponent, replyLimit[state.settings.difficulty]);
   const ownMobility = mobility(simulated, playerId, state.settings.difficulty === 'HARD' ? 80 : 45);
   const enemyMobility = mobility(simulated, opponent, state.settings.difficulty === 'HARD' ? 80 : 45);
-  const terminalBonus = hasLikelyLegalMove({ ...simulated, currentPlayerId: opponent }, opponent) ? 0 : 40;
-  const riskWeight = state.settings.difficulty === 'HARD' ? 0.34 : 0.16;
-  const score = candidate.score + (after - before) * 900 - replyRisk * riskWeight + (ownMobility - enemyMobility) * 0.45 + terminalBonus;
+  return {
+    gainedArea: candidate.evaluation.gainedArea,
+    triangleCount: candidate.evaluation.previewTriangles.length,
+    intersectionCount: candidate.evaluation.intersections.length,
+    ownedDots: previewOwnedNodeCount(candidate.evaluation.previewNodes, playerId) - ownedNodeCount(state, playerId),
+    opponentDots: previewOwnedNodeCount(candidate.evaluation.previewNodes, opponent) - ownedNodeCount(state, opponent),
+    centerBias: 1 - Math.min(1, distance(candidate.move.center, { x: 0.5, y: 0.5 })),
+    spread: Math.min(0.65, distance(candidate.move.center, { x: 0.5, y: 0.5 })),
+    crowding: localCrowding(state, candidate.move.center),
+    frontier: Math.min(1, distance(candidate.move.center, boardActivityCenter(state)) / 0.55),
+    scoreDelta: after - before,
+    replyRisk,
+    mobilityDiff: ownMobility - enemyMobility,
+    terminalBonus: hasLikelyLegalMove({ ...simulated, currentPlayerId: opponent }, opponent) ? 0 : 1,
+  };
+};
+
+const deepenCandidate = (state: GameState, candidate: CpuCandidate, playerId: PlayerId, weights: AiWeights = activeAiWeights): CpuCandidate => {
+  if (state.settings.difficulty === 'EASY') return candidate;
+  const features = candidateFeatures(state, candidate, playerId);
+  const score = scoreFeatures(features, {
+    ...weights,
+    replyRisk: state.settings.difficulty === 'HARD' ? weights.replyRisk : weights.replyRisk * 0.47,
+  });
   return { ...candidate, score };
 };
 
-export const chooseAiMove = async (state: GameState, playerId: PlayerId, shouldLog = false): Promise<CpuCandidate | null> => {
+export const chooseAiMove = async (state: GameState, playerId: PlayerId, shouldLog = false, weights: AiWeights = activeAiWeights): Promise<CpuCandidate | null> => {
   const rng = createRng(`${state.settings.seed}:choice:${playerId}:${state.turn}:${state.lines.length}`);
   const moves = generateMoves(state, playerId);
   const candidates: CpuCandidate[] = [];
   for (let i = 0; i < moves.length; i += 80) {
     for (const move of moves.slice(i, i + 80)) {
-      const candidate = lightCandidate(state, move, playerId);
+      const candidate = lightCandidate(state, move, playerId, weights);
       if (candidate) candidates.push(candidate);
     }
     await chunkDelay();
@@ -157,7 +280,7 @@ export const chooseAiMove = async (state: GameState, playerId: PlayerId, shouldL
   candidates.sort((a, b) => b.score - a.score);
   const narrowed = candidates.slice(0, deepLimit[state.settings.difficulty] || candidates.length);
   const scored: CpuCandidate[] = [];
-  for (const candidate of narrowed) scored.push(deepenCandidate(state, candidate, playerId));
+  for (const candidate of narrowed) scored.push(deepenCandidate(state, candidate, playerId, weights));
   scored.sort((a, b) => b.score - a.score);
 
   const selected = state.settings.difficulty === 'EASY'

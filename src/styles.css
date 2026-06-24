@@ -138,8 +138,9 @@ button.primary {
 }
 
 .dot {
-  stroke: white;
-  stroke-width: 0.005;
+  fill: #64748b;
+  stroke: #f8fafc;
+  stroke-width: 0.003;
 }
 
 .dot.human {

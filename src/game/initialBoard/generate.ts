@@ -49,7 +49,7 @@ export const generateInitialLines = (settings: GameSettings): NeutralLine[] => {
     for (let i = 0; i < 3; i += 1) {
       let added = false;
       for (let tries = 0; tries < 80 && !added; tries += 1) {
-        const length = settings.lineLength * randomBetween(rng, 1.05, 1.45);
+        const length = settings.lineLength * randomBetween(rng, 1.5, 2);
         const angle = randomBetween(rng, -Math.PI * 0.42, Math.PI * 0.42) + (i === 2 ? Math.PI * 0.08 : 0);
         const line = makeNeutral(`neutral-${i + 1}`, anchors[i], angle, length);
         if (validLine(line, lines)) {

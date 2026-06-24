@@ -14,7 +14,8 @@ describe('initial board', () => {
     expect(a).toHaveLength(3);
     for (const line of a) {
       expect(line.neutral).toBe(true);
-      expect(distance(line.a, line.b)).toBeGreaterThan(settings.lineLength);
+      expect(distance(line.a, line.b)).toBeGreaterThanOrEqual(settings.lineLength * 1.5 - 1e-5);
+      expect(distance(line.a, line.b)).toBeLessThanOrEqual(settings.lineLength * 2 + 1e-5);
       expect(isVerticalForbidden(Math.atan2(line.b.y - line.a.y, line.b.x - line.a.x))).toBe(false);
       expect(line.a.x).toBeGreaterThanOrEqual(0);
       expect(line.b.x).toBeLessThanOrEqual(1);

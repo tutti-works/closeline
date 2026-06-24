@@ -1,5 +1,6 @@
 import type { GameState, PlayerId } from '../types/game';
 import { scoreFor } from '../game/state';
+import { clearAiDecisionLogs, readAiDecisionLogs } from '../game/cpu/selfPlayLog';
 
 type Props = {
   state: GameState;
@@ -14,6 +15,7 @@ const playerLabel = (playerId: PlayerId) => (playerId === 'human' ? 'Human' : 'C
 export function ScorePanel({ state, thinking, onSetup, onRules, onRestart }: Props) {
   const human = scoreFor(state, 'human');
   const cpu = scoreFor(state, 'cpu');
+  const aiLogs = readAiDecisionLogs();
   return (
     <aside className="score-panel">
       <div className="turn-card">
@@ -25,6 +27,17 @@ export function ScorePanel({ state, thinking, onSetup, onRules, onRestart }: Pro
         <Score name="CPU" color="cpu" area={cpu.totalArea} count={cpu.count} max={cpu.maxArea} />
       </div>
       {state.lastMessage && <p className="notice">{state.lastMessage}</p>}
+      <details className="ai-log">
+        <summary>AI判断ログ {aiLogs.length}件</summary>
+        {aiLogs.slice(0, 3).map((log) => (
+          <div key={log.id} className="ai-log-entry">
+            <strong>{log.playerId} T{log.turn}</strong>
+            <span>候補 {log.candidateCount} / 得点 {log.selected.score}</span>
+            <small>獲得予定 {(log.selected.gainedArea * 100).toFixed(1)}% / 三角形 {log.selected.triangles}</small>
+          </div>
+        ))}
+        <button onClick={clearAiDecisionLogs}>ログを消去</button>
+      </details>
       <div className="button-row stacked">
         <button onClick={() => onRestart(false)}>同じ盤面でもう一度</button>
         <button onClick={() => onRestart(true)}>新しい盤面</button>

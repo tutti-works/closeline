@@ -85,9 +85,6 @@ const makePreviewNodes = (state: GameState, playerId: PlayerId, points: Point[],
     if (pointOnSegment(point, a, b)) lineIds.push(newLineId);
     const existing = findNodeAt(nodes, point);
     if (existing) {
-      const ownership = existing.ownerships.find((item) => item.playerId === playerId);
-      if (ownership) ownership.lineIds = [...new Set([...ownership.lineIds, ...lineIds])];
-      else existing.ownerships.push({ playerId, turn: state.turn, lineIds });
       existing.lineIds = [...new Set([...existing.lineIds, ...lineIds])];
     } else {
       nodes.push({

@@ -53,7 +53,7 @@ describe('placement', () => {
     expect(evaluateMove(state, 'human', { center: { x: 0.05, y: 0.5 }, angle: 0 }).valid).toBe(false);
   });
 
-  it('creates dots owned by the player and merges shared ownership at same point', () => {
+  it('keeps dot ownership for the first player who created that point', () => {
     const state = stateWith([baseLine('n1', [0.2, 0.5], [0.8, 0.5])]);
     const afterHuman = placeMove(state, 'human', { center: { x: 0.5, y: 0.5 }, angle: Math.PI / 4 });
     expect(afterHuman.nodes).toHaveLength(1);
@@ -61,7 +61,10 @@ describe('placement', () => {
     const cpuState = { ...afterHuman, currentPlayerId: 'cpu' as const };
     const afterCpu = placeMove(cpuState, 'cpu', { center: { x: 0.5, y: 0.5 }, angle: -Math.PI / 4 });
     const shared = afterCpu.nodes.find((node) => node.ownerships.length > 1);
-    expect(shared).toBeTruthy();
+    expect(shared).toBeUndefined();
+    const originalDot = afterCpu.nodes.find((node) => Math.abs(node.point.x - 0.5) < 1e-5 && Math.abs(node.point.y - 0.5) < 1e-5);
+    expect(originalDot?.ownerships).toHaveLength(1);
+    expect(originalDot?.ownerships[0].playerId).toBe('human');
   });
 
   it('creates a dot for endpoint contact when the move also has a proper crossing', () => {

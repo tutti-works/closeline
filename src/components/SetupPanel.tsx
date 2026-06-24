@@ -1,4 +1,4 @@
-import type { Difficulty, GameSettings } from '../types/game';
+import type { Difficulty, GameSettings, PlayerId } from '../types/game';
 
 type Props = {
   settings: GameSettings;
@@ -12,7 +12,7 @@ export function SetupPanel({ settings, onChange, onStart }: Props) {
     <section className="panel setup-panel">
       <div>
         <p className="eyebrow">CLOSELINE</p>
-        <h1>交点でドットを作り、実在する線で三角形を囲む陣取りゲーム</h1>
+        <h1>交点でドットを作り、閉じた線で三角形を奪う陣取りゲーム</h1>
       </div>
       <label>
         CPU難易度
@@ -20,6 +20,13 @@ export function SetupPanel({ settings, onChange, onStart }: Props) {
           <option>EASY</option>
           <option>NORMAL</option>
           <option>HARD</option>
+        </select>
+      </label>
+      <label>
+        先攻
+        <select value={settings.firstPlayer} onChange={(event) => patch({ firstPlayer: event.target.value as PlayerId })}>
+          <option value="human">プレイヤー</option>
+          <option value="cpu">CPU</option>
         </select>
       </label>
       <label>
@@ -32,7 +39,7 @@ export function SetupPanel({ settings, onChange, onStart }: Props) {
         <span>{Math.round(settings.lineLength * 100)}%</span>
       </label>
       <label>
-        最低三角形面積
+        最小三角形面積
         <select value={settings.minTriangleAreaRatio} onChange={(event) => patch({ minTriangleAreaRatio: Number(event.target.value) })}>
           <option value={0.005}>0.5%</option>
           <option value={0.01}>1.0%</option>

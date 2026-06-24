@@ -65,6 +65,7 @@ export type TerritoryTriangle = {
 
 export type GameSettings = {
   difficulty: Difficulty;
+  firstPlayer: PlayerId;
   maxTurns: number;
   lineLength: number;
   minTriangleAreaRatio: number;

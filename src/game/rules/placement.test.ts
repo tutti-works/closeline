@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GameState, LineSegment } from '../../types/game';
 import { defaultSettings, players } from '../state';
-import { evaluateMove, placeMove } from './placement';
+import { evaluateMove, passTurn, placeMove } from './placement';
 
 const baseLine = (id: string, a: [number, number], b: [number, number]): LineSegment => ({
   id,
@@ -26,6 +26,20 @@ const stateWith = (lines: LineSegment[]): GameState => ({
 });
 
 describe('placement', () => {
+  it('advances the round after the configured second player moves', () => {
+    const state = {
+      ...stateWith([]),
+      settings: { ...stateWith([]).settings, firstPlayer: 'cpu' as const },
+      currentPlayerId: 'cpu' as const,
+    };
+    const afterCpu = passTurn(state, 'cpu');
+    expect(afterCpu.currentPlayerId).toBe('human');
+    expect(afterCpu.turn).toBe(1);
+    const afterHuman = passTurn({ ...afterCpu, consecutivePasses: 0 }, 'human');
+    expect(afterHuman.currentPlayerId).toBe('cpu');
+    expect(afterHuman.turn).toBe(2);
+  });
+
   it('rejects moves without proper intersection and accepts crossing moves', () => {
     const state = stateWith([baseLine('n1', [0.2, 0.5], [0.8, 0.5])]);
     expect(evaluateMove(state, 'human', { center: { x: 0.5, y: 0.8 }, angle: 0 }).valid).toBe(false);

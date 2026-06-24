@@ -9,6 +9,7 @@ export const players: Player[] = [
 
 export const defaultSettings = (): GameSettings => ({
   difficulty: 'NORMAL',
+  firstPlayer: 'human',
   maxTurns: DEFAULT_MAX_TURNS,
   lineLength: DEFAULT_LINE_LENGTH,
   minTriangleAreaRatio: DEFAULT_MIN_AREA_RATIO,
@@ -21,7 +22,7 @@ export const createGame = (settings: GameSettings): GameState => ({
   players,
   settings,
   phase: 'playing',
-  currentPlayerId: 'human',
+  currentPlayerId: settings.firstPlayer,
   turn: 1,
   consecutivePasses: 0,
   lines: generateInitialLines(settings),

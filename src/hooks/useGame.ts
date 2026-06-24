@@ -6,8 +6,11 @@ import { loadGame, saveGame } from '../game/persistence/storage';
 const loadValidGame = () => {
   const saved = loadGame();
   if (!saved || !Array.isArray(saved.lines) || saved.lines.filter((line) => line.neutral).length !== 3) return null;
+  const settings = { ...defaultSettings(), ...saved.settings };
   return {
     ...saved,
+    settings,
+    currentPlayerId: saved.currentPlayerId ?? settings.firstPlayer,
     lines: saved.lines.map((line) => ({ ...line, active: true })),
   };
 };

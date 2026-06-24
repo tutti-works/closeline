@@ -1,6 +1,6 @@
 import type { CpuCandidate, GameState, Move, PlayerId, Point } from '../../types/game';
 import { createRng, randomBetween } from '../random';
-import { evaluateMove, hasLikelyLegalMove, placeMove } from '../rules/placement';
+import { evaluateMove, placeMove } from '../rules/placement';
 import { distance } from '../geometry/math';
 import { scoreFor } from '../state';
 import { appendAiDecisionLog } from './selfPlayLog';
@@ -15,13 +15,13 @@ const candidateLimit = {
 const deepLimit = {
   EASY: 0,
   NORMAL: 14,
-  HARD: 26,
+  HARD: 9,
 } as const;
 
-const replyLimit = {
+const tacticLimit = {
   EASY: 0,
-  NORMAL: 70,
-  HARD: 120,
+  NORMAL: 50,
+  HARD: 42,
 } as const;
 
 const chunkDelay = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -188,8 +188,41 @@ export const generateMoves = (state: GameState, playerId: PlayerId, maxRandom: n
   return dedupeMoves(moves);
 };
 
-const mobility = (state: GameState, playerId: PlayerId, sample = 50) =>
-  generateMoves(state, playerId, sample).filter((move) => evaluateMove(state, playerId, move).valid).length;
+type TacticalThreat = {
+  score: number;
+  area: number;
+  triangles: number;
+  candidates: number;
+};
+
+const emptyThreat: TacticalThreat = {
+  score: 0,
+  area: 0,
+  triangles: 0,
+  candidates: 0,
+};
+
+const tacticalThreat = (state: GameState, playerId: PlayerId, maxRandom: number): TacticalThreat => {
+  if (maxRandom <= 0) return emptyThreat;
+  let best = emptyThreat;
+  for (const move of generateMoves(state, playerId, maxRandom)) {
+    const evaluation = evaluateMove(state, playerId, move);
+    if (!evaluation.valid || evaluation.previewTriangles.length === 0) continue;
+    const largestArea = Math.max(...evaluation.previewTriangles.map((triangle) => triangle.area));
+    const score = evaluation.gainedArea * 18000 + largestArea * 6000 + evaluation.previewTriangles.length * 1200;
+    if (score > best.score) {
+      best = {
+        score,
+        area: evaluation.gainedArea,
+        triangles: evaluation.previewTriangles.length,
+        candidates: best.candidates + 1,
+      };
+    } else {
+      best = { ...best, candidates: best.candidates + 1 };
+    }
+  }
+  return best;
+};
 
 export const lightCandidate = (state: GameState, move: Move, playerId: PlayerId, weights: AiWeights = activeAiWeights): CpuCandidate | null => {
   const evaluation = evaluateMove(state, playerId, move);
@@ -220,23 +253,11 @@ export const lightCandidate = (state: GameState, move: Move, playerId: PlayerId,
   return { move, evaluation, score };
 };
 
-const bestReplyScore = (state: GameState, playerId: PlayerId, maxMoves: number) => {
-  const candidates = generateMoves(state, playerId, maxMoves)
-    .map((move) => lightCandidate(state, move, playerId))
-    .filter((candidate): candidate is CpuCandidate => candidate !== null)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 12);
-  return candidates.reduce((best, candidate) => Math.max(best, candidate.score), 0);
-};
-
 export const candidateFeatures = (state: GameState, candidate: CpuCandidate, playerId: PlayerId): AiFeatures => {
   const opponent = opponentOf(playerId);
   const simulated = placeMove(state, playerId, candidate.move);
   const before = scoreFor(state, playerId).totalArea - scoreFor(state, opponent).totalArea;
   const after = scoreFor(simulated, playerId).totalArea - scoreFor(simulated, opponent).totalArea;
-  const replyRisk = bestReplyScore(simulated, opponent, replyLimit[state.settings.difficulty]);
-  const ownMobility = mobility(simulated, playerId, state.settings.difficulty === 'HARD' ? 80 : 45);
-  const enemyMobility = mobility(simulated, opponent, state.settings.difficulty === 'HARD' ? 80 : 45);
   return {
     gainedArea: candidate.evaluation.gainedArea,
     triangleCount: candidate.evaluation.previewTriangles.length,
@@ -248,19 +269,35 @@ export const candidateFeatures = (state: GameState, candidate: CpuCandidate, pla
     crowding: localCrowding(state, candidate.move.center),
     frontier: Math.min(1, distance(candidate.move.center, boardActivityCenter(state)) / 0.55),
     scoreDelta: after - before,
-    replyRisk,
-    mobilityDiff: ownMobility - enemyMobility,
-    terminalBonus: hasLikelyLegalMove({ ...simulated, currentPlayerId: opponent }, opponent) ? 0 : 1,
+    replyRisk: 0,
+    mobilityDiff: 0,
+    terminalBonus: 0,
   };
 };
 
-const deepenCandidate = (state: GameState, candidate: CpuCandidate, playerId: PlayerId, weights: AiWeights = activeAiWeights): CpuCandidate => {
+const tacticalScore = (state: GameState, candidate: CpuCandidate, playerId: PlayerId, opponentThreatBefore: TacticalThreat) => {
+  if (state.settings.difficulty === 'EASY') return 0;
+  const opponent = opponentOf(playerId);
+  const simulated = placeMove(state, playerId, candidate.move);
+  const ownFollowupThreat = tacticalThreat(simulated, playerId, state.settings.difficulty === 'HARD' ? 20 : 18);
+  const hasImmediateCapture = candidate.evaluation.previewTriangles.length > 0;
+  const afterOpponentThreat = hasImmediateCapture ? tacticalThreat(simulated, opponent, tacticLimit[state.settings.difficulty]) : opponentThreatBefore;
+  const immediateCapture =
+    candidate.evaluation.gainedArea * 26000 +
+    candidate.evaluation.previewTriangles.length * 1500;
+  const preemptedThreat = hasImmediateCapture ? Math.max(0, opponentThreatBefore.score - afterOpponentThreat.score) * 0.9 : 0;
+  const setupBonus = ownFollowupThreat.score * (state.settings.difficulty === 'HARD' ? 0.22 : 0.12);
+  return immediateCapture + preemptedThreat + setupBonus;
+};
+
+const deepenCandidate = (
+  state: GameState,
+  candidate: CpuCandidate,
+  playerId: PlayerId,
+  opponentThreatBefore: TacticalThreat,
+): CpuCandidate => {
   if (state.settings.difficulty === 'EASY') return candidate;
-  const features = candidateFeatures(state, candidate, playerId);
-  const score = scoreFeatures(features, {
-    ...weights,
-    replyRisk: state.settings.difficulty === 'HARD' ? weights.replyRisk : weights.replyRisk * 0.47,
-  });
+  const score = candidate.score + tacticalScore(state, candidate, playerId, opponentThreatBefore);
   return { ...candidate, score };
 };
 
@@ -279,8 +316,9 @@ export const chooseAiMove = async (state: GameState, playerId: PlayerId, shouldL
 
   candidates.sort((a, b) => b.score - a.score);
   const narrowed = candidates.slice(0, deepLimit[state.settings.difficulty] || candidates.length);
+  const opponentThreatBefore = tacticalThreat(state, opponentOf(playerId), tacticLimit[state.settings.difficulty]);
   const scored: CpuCandidate[] = [];
-  for (const candidate of narrowed) scored.push(deepenCandidate(state, candidate, playerId, weights));
+  for (const candidate of narrowed) scored.push(deepenCandidate(state, candidate, playerId, opponentThreatBefore));
   scored.sort((a, b) => b.score - a.score);
 
   const selected = state.settings.difficulty === 'EASY'

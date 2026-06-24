@@ -136,7 +136,7 @@ export const passTurn = (state: GameState, playerId: PlayerId, reason = '合法�
 const advanceTurn = (state: GameState): GameState => ({
   ...state,
   currentPlayerId: otherPlayer(state.currentPlayerId),
-  turn: state.currentPlayerId === 'cpu' ? state.turn + 1 : state.turn,
+  turn: state.currentPlayerId === otherPlayer(state.settings.firstPlayer) ? state.turn + 1 : state.turn,
 });
 
 export const makeMoveFromDrag = (center: Point, pointer: Point): Move => ({

@@ -207,6 +207,7 @@ const train = async () => {
   for (let game = 0; game < games; game += 1) {
     const settings: GameSettings = {
       difficulty: 'HARD',
+      firstPlayer: 'human',
       maxTurns,
       lineLength: 0.25,
       minTriangleAreaRatio: 0.01,

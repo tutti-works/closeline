@@ -18,7 +18,7 @@ export type SelfPlayGameLog = {
 };
 
 export const runSelfPlayGame = async (settings: GameSettings): Promise<SelfPlayGameLog> => {
-  let state: GameState = { ...createGame(settings), currentPlayerId: 'cpu' };
+  let state: GameState = createGame(settings);
   const moves: SelfPlayGameLog['moves'] = [];
   while (state.phase === 'playing') {
     const playerId = state.currentPlayerId;

@@ -80,6 +80,12 @@ const moveAroundLine = (lineA: Point, lineB: Point, angle: number, t: number): M
   angle,
 });
 
+const addFanMoves = (moves: Move[], start: Point, baseAngle: number, length: number) => {
+  for (const offset of [0, Math.PI / 6, -Math.PI / 6, Math.PI / 3, -Math.PI / 3, Math.PI / 2, -Math.PI / 2]) {
+    moves.push(moveFromStart(start, baseAngle + offset, length));
+  }
+};
+
 const moveKey = (move: Move) => `${move.center.x.toFixed(3)},${move.center.y.toFixed(3)},${move.angle.toFixed(3)}`;
 
 const dedupeMoves = (moves: Move[]) => {
@@ -150,6 +156,12 @@ export const generateMoves = (state: GameState, playerId: PlayerId, maxRandom: n
     for (let i = 0; i < 4; i += 1) moves.push(moveFromStart(node.point, randomBetween(rng, 0, Math.PI * 2), state.settings.lineLength));
   }
 
+  const activityCenter = boardActivityCenter(state);
+  for (const node of [...ownNodes, ...enemyNodes].slice(-18)) {
+    const outward = Math.atan2(node.point.y - activityCenter.y, node.point.x - activityCenter.x);
+    addFanMoves(moves, node.point, outward, state.settings.lineLength);
+  }
+
   for (const nodes of [ownNodes, enemyNodes]) {
     for (let i = 0; i < nodes.length; i += 1) {
       for (let j = i + 1; j < nodes.length; j += 1) {
@@ -172,7 +184,6 @@ export const generateMoves = (state: GameState, playerId: PlayerId, maxRandom: n
     });
   }
 
-  const activityCenter = boardActivityCenter(state);
   for (const line of activeLines.slice(-12)) {
     const baseAngle = Math.atan2(line.b.y - line.a.y, line.b.x - line.a.x);
     const lineCenter = { x: (line.a.x + line.b.x) / 2, y: (line.a.y + line.b.y) / 2 };

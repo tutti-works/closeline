@@ -53,7 +53,7 @@ export default function App() {
       </header>
       <div className="layout">
         <GameBoard state={state} setState={setState} />
-        <ScorePanel state={state} thinking={thinking} onSetup={() => setShowSetup(true)} onRules={() => setShowTutorial(true)} onRestart={(newSeed) => startNew(settings, newSeed)} />
+        <ScorePanel state={state} thinking={thinking} onSetup={() => setShowSetup(true)} onRestart={(newSeed) => startNew(settings, newSeed)} />
       </div>
       <Tutorial open={showTutorial} onClose={() => setShowTutorial(false)} />
       <ResultModal state={state} onSame={() => startNew(settings, false)} onNew={() => startNew(settings, true)} onSetup={() => setShowSetup(true)} />

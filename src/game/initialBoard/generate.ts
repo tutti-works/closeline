@@ -4,13 +4,13 @@ import { isVerticalForbidden, segmentFromCenter, segmentWithinBoard } from '../g
 import { segmentDistance, segmentIntersection } from '../geometry/segments';
 import { createRng, randomBetween } from '../random';
 
-const minDistance = 0.15;
+const minDistance = 0.22;
 const edgeMargin = 0.1;
 
 const fallback = (settings: GameSettings): NeutralLine[] => [
-  makeNeutral('neutral-1', { x: 0.25, y: 0.32 }, -0.42, settings.lineLength * 1.22),
-  makeNeutral('neutral-2', { x: 0.72, y: 0.38 }, 0.38, settings.lineLength * 1.16),
-  makeNeutral('neutral-3', { x: 0.47, y: 0.72 }, -0.18, settings.lineLength * 1.28),
+  makeNeutral('neutral-1', { x: 0.22, y: 0.24 }, -0.38, settings.lineLength * 1.5),
+  makeNeutral('neutral-2', { x: 0.78, y: 0.35 }, 0.36, settings.lineLength * 1.55),
+  makeNeutral('neutral-3', { x: 0.48, y: 0.78 }, -0.16, settings.lineLength * 1.6),
 ];
 
 const makeNeutral = (id: string, center: Point, angle: number, length: number): NeutralLine => {

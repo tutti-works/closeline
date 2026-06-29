@@ -17,9 +17,9 @@ export function Tutorial({ open, onClose }: Props) {
           <li>自分のドット3点が線で囲まれると、三角形を獲得します。</li>
           <li>小さすぎる三角形は獲得できません。設定の最小面積以上が必要です。</li>
           <li>三角形の辺には、中立線・自分の線・相手の線を使えます。</li>
-          <li>勝敗は、獲得した三角形の面積合計で決まります。</li>
           <li>獲得済み陣地の内部・辺・頂点には、新しい線を引けません。</li>
           <li>縦方向に近い線、既存線と重なる線、盤面外へ出る線は禁止です。</li>
+          <li>勝敗は、獲得した三角形の面積合計で決まります。</li>
         </ol>
         <button className="primary" onClick={onClose}>閉じる</button>
       </section>

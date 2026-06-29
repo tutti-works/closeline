@@ -111,7 +111,7 @@ export const placeMove = (state: GameState, playerId: PlayerId, move: Move): Gam
     nodes: evaluation.previewNodes,
     consecutivePasses: 0,
     lastPass: undefined,
-    lastMessage: evaluation.previewTriangles.length > 0 ? `${evaluation.previewTriangles.length}個の三角形を獲得` : undefined,
+    lastMessage: undefined,
   };
   next = applyTerritoryCapture(next, evaluation.previewTriangles);
   const advanced = advanceTurn(next);

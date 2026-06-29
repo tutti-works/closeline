@@ -7,3 +7,4 @@ export const DEFAULT_LINE_LENGTH = 0.3;
 export const DEFAULT_MIN_AREA_RATIO = 0.005;
 export const STORAGE_KEY = 'closeline.v2.state';
 export const TUTORIAL_KEY = 'closeline.v2.tutorialSeen';
+export const THEME_KEY = 'closeline.v2.theme';

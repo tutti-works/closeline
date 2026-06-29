@@ -8,8 +8,8 @@ export const players: Player[] = [
 ];
 
 export const defaultSettings = (): GameSettings => ({
-  difficulty: 'NORMAL',
-  firstPlayer: 'human',
+  difficulty: 'HARD',
+  firstPlayer: 'cpu',
   maxTurns: DEFAULT_MAX_TURNS,
   lineLength: DEFAULT_LINE_LENGTH,
   minTriangleAreaRatio: DEFAULT_MIN_AREA_RATIO,
